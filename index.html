@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AI Cat's Cradle</title>
+
+<!-- ==============================================================
+
+
+     LIBRARIES
+     ============================================================== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+
+<style>
+/* ==================================================================
+   STYLE / GLOBAL RESET
+   ================================================================== */
+:root{
+  --neon-cyan:#00f6ff;
+  --neon-magenta:#ff00e5;
+  --neon-yellow:#fff200;
+  --neon-blue:#0077ff;
+  --neon-purple:#a600ff;
+  --panel-bg: rgba(10, 14, 30, 0.45);
+  --panel-border: rgba(0, 246, 255, 0.35);
+}
+
+*{ box-sizing:border-box; }
+
+html,body{
+  margin:0; padding:0; width:100%; height:100%;
+  overflow:hidden;
+  background:#02030a;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color:#eafcff;
+}
+
+#appRoot{
+  position:relative;
+  width:100vw; height:100vh;
+  overflow:hidden;
+}
+
+/* Mirrored webcam feed, sits at the very back */
+#webcamVideo{
+  position:absolute;
+  top:50%; left:50%;
+  transform: translate(-50%,-50%) scaleX(-1);
+  min-width:100%; min-height:100%;
+  width:auto; height:auto;
+  object-fit:cover;
+
+  opacity:0.82;
+  filter:
+    saturate(1.25)
+    contrast(1.05)
+    brightness(1.15);
+
+  transition: opacity 0.4s ease;
+  z-index:1;
+}
+#webcamVideo.hiddenCam{ opacity:0; }
+
+/* p5 canvas sits above the video, background transparent */
+#appRoot canvas{
+  position:absolute;
+  top:0; left:0;
+  z-index:2;
+  pointer-events:none;
+}
+
+/* Animated dark vignette overlay */
+#vignette{
+  position:absolute; inset:0;
+  z-index:3;
+  pointer-events:none;
+  background:
+    radial-gradient(
+      ellipse at center,
+      rgba(2,3,10,0) 45%,
+      rgba(2,3,10,0.25) 80%,
+      rgba(0,0,0,0.55) 100%
+    );
+  animation: vignettePulse 6s ease-in-out infinite;
+}
+@keyframes vignettePulse{
+  0%,100%{ opacity:0.85; }
+  50%{ opacity:1; }
+}
+
+/* CRT scanlines */
+#scanlines{
+  position:absolute; inset:0;
+  z-index:4;
+  pointer-events:none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255,255,255,0.035) 0px,
+    rgba(255,255,255,0.035) 1px,
+    rgba(0,0,0,0) 2px,
+    rgba(0,0,0,0) 3px
+  );
+  mix-blend-mode: overlay;
+  opacity:0.25;
+}
+
+/* subtle grain/noise */
+#noiseLayer{
+  position:absolute; inset:0;
+  z-index:5;
+  pointer-events:none;
+  opacity:0.025;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  animation: grainShift 1s steps(4) infinite;
+}
+@keyframes grainShift{
+  0%{ transform:translate(0,0); }
+  25%{ transform:translate(-1%,1%); }
+  50%{ transform:translate(1%,-1%); }
+  75%{ transform:translate(-1%,-1%); }
+  100%{ transform:translate(0,0); }
+}
+
+/* ==================================================================
+   UI PANEL - GLASSMORPHISM
+   ================================================================== */
+#hudPanel{
+  position:absolute;
+  top:18px; left:18px;
+  z-index:10;
+  width:250px;
+  padding:16px 18px;
+  border-radius:16px;
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 0 24px rgba(0,246,255,0.12), inset 0 0 20px rgba(0,246,255,0.05);
+  animation: panelGlow 4s ease-in-out infinite;
+}
+@keyframes panelGlow{
+  0%,100%{ box-shadow: 0 0 24px rgba(0,246,255,0.12), inset 0 0 20px rgba(0,246,255,0.05); }
+  50%{ box-shadow: 0 0 34px rgba(255,0,229,0.16), inset 0 0 24px rgba(255,0,229,0.06); }
+}
+
+#hudPanel h1{
+  margin:0 0 10px 0;
+  font-size:15px;
+  letter-spacing:2.5px;
+  font-weight:700;
+  text-transform:uppercase;
+  background:linear-gradient(90deg, var(--neon-cyan), var(--neon-magenta), var(--neon-yellow));
+  background-size:200% auto;
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  animation: titleShift 5s linear infinite;
+}
+@keyframes titleShift{
+  0%{ background-position:0% center; }
+  100%{ background-position:200% center; }
+}
+
+.statRow{
+  display:flex; justify-content:space-between;
+  font-size:12px; letter-spacing:0.5px;
+  padding:4px 0;
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  color:#bfeeff;
+}
+.statRow span:last-child{
+  font-weight:600;
+  color:var(--neon-cyan);
+  text-shadow:0 0 6px rgba(0,246,255,0.6);
+}
+.statRow .ok{ color:#5dffb0; text-shadow:0 0 6px rgba(93,255,176,0.6); }
+.statRow .warn{ color:#ff5d7a; text-shadow:0 0 6px rgba(255,93,122,0.6); }
+
+#hudButtons{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-top:12px;
+}
+.hudBtn{
+  cursor:pointer;
+  font-size:11px;
+  letter-spacing:0.8px;
+  text-transform:uppercase;
+  text-align:center;
+  padding:9px 6px;
+  border-radius:9px;
+  color:#eafcff;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(0,246,255,0.28);
+  transition: all 0.2s ease;
+  user-select:none;
+}
+.hudBtn:hover{
+  background:rgba(0,246,255,0.14);
+  box-shadow:0 0 14px rgba(0,246,255,0.35);
+  transform:translateY(-1px);
+}
+.hudBtn:active{ transform:translateY(0px) scale(0.97); }
+.creatorTag{
+  margin-top:14px;
+  text-align:center;
+  font-size:11px;
+  letter-spacing:3px;
+  font-weight:700;
+  text-transform:uppercase;
+
+  background:
+    linear-gradient(
+      90deg,
+      var(--neon-cyan),
+      var(--neon-magenta),
+      var(--neon-yellow)
+    );
+
+  background-size:200% auto;
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+
+  animation:titleShift 5s linear infinite;
+
+  text-shadow:
+    0 0 12px rgba(0,246,255,0.45);
+}
+
+/* ==================================================================
+   STATUS / LOADING / ERROR OVERLAY
+   ================================================================== */
+#statusOverlay{
+  position:absolute; inset:0;
+  z-index:50;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:18px;
+  background:radial-gradient(circle at center, #060812 0%, #010103 100%);
+  text-align:center;
+  padding:24px;
+  transition:opacity 0.5s ease;
+}
+#statusOverlay.hidden{ opacity:0; pointer-events:none; }
+
+.spinner{
+  width:58px; height:58px;
+  border-radius:50%;
+  border:3px solid rgba(0,246,255,0.15);
+  border-top-color:var(--neon-cyan);
+  border-right-color:var(--neon-magenta);
+  animation:spin 1s linear infinite;
+  box-shadow:0 0 22px rgba(0,246,255,0.35);
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+
+#statusOverlay h2{
+  font-size:20px; letter-spacing:3px; text-transform:uppercase;
+  background:linear-gradient(90deg, var(--neon-cyan), var(--neon-magenta));
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  margin:0;
+}
+#statusOverlay p{
+  max-width:420px; font-size:13.5px; line-height:1.6; color:#9fd6e0; margin:0;
+}
+#statusOverlay button{
+  margin-top:6px;
+  padding:10px 22px;
+  border-radius:10px;
+  border:1px solid var(--neon-cyan);
+  background:rgba(0,246,255,0.08);
+  color:#eafcff;
+  cursor:pointer;
+  font-size:13px;
+  letter-spacing:1px;
+  text-transform:uppercase;
+}
+#statusOverlay button:hover{ background:rgba(0,246,255,0.2); }
+
+/* Responsive tweaks */
+@media (max-width:640px){
+  #hudPanel{ width:calc(100vw - 36px); top:12px; left:12px; padding:12px 14px; }
+  #hudPanel h1{ font-size:13px; }
+  .statRow{ font-size:11px; }
+  .hudBtn{ font-size:10px; padding:8px 4px; }
+}
+</style>
+</head>
+<body>
+
+<div id="appRoot">
+  <!-- Webcam layer -->
+  <video id="webcamVideo" autoplay playsinline muted></video>
+
+  <!-- p5 canvas mounts here -->
+  <div id="canvasHolder"></div>
+
+  <div id="vignette"></div>
+  <div id="scanlines"></div>
+  <div id="noiseLayer"></div>
+
+  <!-- HUD -->
+  <div id="hudPanel">
+    <h1>AI Cat's Cradle</h1>
+    <div class="statRow"><span>FPS</span><span id="statFps">--</span></div>
+    <div class="statRow"><span>Hands Detected</span><span id="statHands">0</span></div>
+    <div class="statRow"><span>Status</span><span id="statStatus" class="warn">Booting</span></div>
+    <div id="hudButtons">
+  <div class="hudBtn" id="btnFullscreen">Fullscreen</div>
+  <div class="hudBtn" id="btnToggleCam">Hide Camera</div>
+  <div class="hudBtn" id="btnReset">Reset Effects</div>
+  <div class="hudBtn" id="btnRestartCam">Restart Cam</div>
+</div>
+
+<div class="creatorTag">
+  SUMIT BHARDWAJ
+</div>
+  </div>
+
+  <!-- Status / loading / error overlay -->
+  <div id="statusOverlay">
+    <div class="spinner" id="statusSpinner"></div>
+    <h2 id="statusTitle">Initializing Neural Vision</h2>
+    <p id="statusMessage">Requesting camera access and loading the hand-tracking model. This only takes a moment.</p>
+    <button id="statusRetryBtn" style="display:none;">Try Again</button>
+  </div>
+</div>
+
+<!-- ==============================================================
+     MEDIAPIPE TASKS VISION (ESM)
+     ============================================================== -->
+<script type="module">
+import {
+  HandLandmarker,
+  FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+/* ==================================================================
+   ==============================================================
+   SETUP
+   ==============================================================
+   ================================================================== */
+
+// Global shared state, read by the p5 sketch defined further below.
+window.CradleApp = {
+  handLandmarker: null,
+  video: document.getElementById("webcamVideo"),
+  hands: [],              // latest detection result: array of {landmarks:[{x,y,z}...], handedness}
+  running: false,
+  lastVideoTime: -1,
+  detectionFps: 0,
+  cameraReady: false,
+  modelReady:false,
+detecting:false,
+};
+
+const statusOverlay   = document.getElementById("statusOverlay");
+const statusTitle     = document.getElementById("statusTitle");
+const statusMessage   = document.getElementById("statusMessage");
+const statusSpinner   = document.getElementById("statusSpinner");
+const statusRetryBtn  = document.getElementById("statusRetryBtn");
+const statStatusEl    = document.getElementById("statStatus");
+
+function setStatus(text, cls){
+  statStatusEl.textContent = text;
+  statStatusEl.className = cls || "";
+}
+
+function showError(title, message){
+  statusOverlay.classList.remove("hidden");
+  statusSpinner.style.display = "none";
+  statusTitle.textContent = title;
+  statusMessage.textContent = message;
+  statusRetryBtn.style.display = "inline-block";
+  setStatus("Error", "warn");
+}
+
+statusRetryBtn.addEventListener("click", () => {
+  location.reload();
+});
+
+/* ==================================================================
+   BROWSER SUPPORT CHECK
+   ================================================================== */
+function browserSupported(){
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.WebAssembly);
+}
+
+function checkServedOverHttp(){
+  if(location.protocol === "file:"){
+    showError(
+      "Must Be Served Over HTTP",
+      "This page was opened directly from disk (file://), which browsers block from loading the hand-tracking model. Run a local server instead, e.g. \"python3 -m http.server 8000\" in this folder, then open http://localhost:8000/index.html."
+    );
+    return false;
+  }
+  return true;
+}
+
+/* ==================================================================
+   ==============================================================
+   CAMERA
+   ==============================================================
+   ================================================================== */
+async function initCamera(){
+  if(!browserSupported()){
+    showError("Unsupported Browser", "Your browser does not support the camera or WebAssembly APIs required for this experience. Please try an up-to-date version of Chrome, Edge, or Firefox.");
+    throw new Error("unsupported-browser");
+  }
+
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+height: { ideal: 360 },
+frameRate: { ideal: 60, max: 60 },
+        facingMode:"user"
+      },
+      audio:false
+    });
+    const video = window.CradleApp.video;
+    video.srcObject = stream;
+
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => {
+        video.play();
+        resolve();
+      };
+    });
+
+    window.CradleApp.cameraReady = true;
+  }catch(err){
+    console.error("Camera error:", err);
+    showError("Camera Access Denied", "AI Cat's Cradle needs webcam access to track your hands. Please allow camera permissions in your browser settings and try again.");
+    throw err;
+  }
+}
+
+/* ==================================================================
+   ==============================================================
+   HAND TRACKING (MediaPipe Tasks Vision)
+   ==============================================================
+   ================================================================== */
+async function initHandLandmarker(){
+  let vision;
+  try{
+    vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+  }catch(err){
+    console.error("WASM fileset load error:", err);
+    showError(
+      "Could Not Load Vision Engine",
+      "Failed to fetch the MediaPipe WASM runtime from cdn.jsdelivr.net. If you're on a local server, check your internet connection and make sure jsdelivr.net isn't blocked by a firewall, ad-blocker, or proxy."
+    );
+    throw err;
+  }
+
+  // storage.googleapis.com (and even GitHub release assets) are blocked on
+  // some networks/regions. Try a locally-served copy first (if the user has
+  // placed hand_landmarker.task next to this HTML file), then fall back to
+  // remote sources across both GPU and CPU delegates.
+  const modelSources = [
+    "./hand_landmarker.task",
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+    "https://github.com/sanderdesnaijer/mediapipe-model-mirrors/releases/download/v1/hand_landmarker.task"
+  ];
+  const delegates = ["GPU", "CPU"];
+
+  let lastErr = null;
+  for(const delegate of delegates){
+    for(const modelUrl of modelSources){
+      try{
+        window.CradleApp.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: modelUrl, delegate },
+          runningMode: "VIDEO",
+          numHands: 2,
+minHandDetectionConfidence: 0.65,
+minHandPresenceConfidence: 0.65,
+minTrackingConfidence: 0.75
+        });
+        window.CradleApp.modelReady = true;
+        console.info(`Hand landmarker loaded via ${delegate} from ${modelUrl}`);
+        return;
+      }catch(err){
+        console.error(`Model load failed (delegate=${delegate}, url=${modelUrl}):`, err);
+        lastErr = err;
+      }
+    }
+  }
+
+  showError(
+    "Model Failed To Load",
+    "Could not download the hand-tracking model from storage.googleapis.com, a GitHub mirror, or find a local copy. Your network appears to block both Google Cloud Storage and GitHub release downloads. Fix: download hand_landmarker.task from https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task on any device/network that can reach it, then place the file in the same folder as this index.html and reload."
+  );
+  throw lastErr;
+}
+
+/* ==================================================================
+   DETECTION LOOP
+   ================================================================== */
+let fpsAccumulator = 0;
+let fpsFrameCount = 0;
+let fpsLastSample = performance.now();
+
+function detectionLoop(){
+  const app = window.CradleApp;
+  if(!app.running){ return; }
+
+  const video = app.video;
+
+  if(video.readyState >= 2 && video.currentTime !== app.lastVideoTime){
+    app.lastVideoTime = video.currentTime;
+    const nowMs = performance.now();
+    try{
+      if(app.detecting) return;
+
+app.detecting = true;
+
+const result = app.handLandmarker.detectForVideo(video, nowMs);
+
+app.detecting = false;
+      app.hands = (result && result.landmarks) ? result.landmarks.map((lm, i) => ({
+        landmarks: lm,
+        handedness: result.handednesses && result.handednesses[i] ? result.handednesses[i][0].categoryName : "Unknown"
+      })) : [];
+    }catch(err){
+      // Non-fatal per-frame error; skip this frame.
+    }
+
+    fpsFrameCount++;
+    const elapsed = nowMs - fpsLastSample;
+    if(elapsed >= 500){
+      app.detectionFps = Math.round((fpsFrameCount / elapsed) * 1000);
+      fpsFrameCount = 0;
+      fpsLastSample = nowMs;
+    }
+  }
+
+  setTimeout(detectionLoop,16);
+}
+
+/* ==================================================================
+   BOOTSTRAP
+   ================================================================== */
+async function bootstrap(){
+  if(!checkServedOverHttp()){
+    return;
+  }
+  try{
+    setStatus("Loading Model", "warn");
+    await initHandLandmarker();
+
+    setStatus("Requesting Camera", "warn");
+    await initCamera();
+
+    window.CradleApp.running = true;
+    detectionLoop();
+
+    setStatus("Live", "ok");
+    statusOverlay.classList.add("hidden");
+  }catch(err){
+    // Error already surfaced via showError().
+  }
+}
+
+bootstrap();
+
+/* ==================================================================
+   RESTART CAMERA BUTTON HANDLER (defined here since it touches module scope)
+   ================================================================== */
+document.getElementById("btnRestartCam").addEventListener("click", async () => {
+  try{
+    setStatus("Restarting", "warn");
+    await initCamera();
+    setStatus("Live", "ok");
+  }catch(err){
+    /* handled by initCamera */
+  }
+});
+
+</script>
+
+<!-- ==============================================================
+     P5.JS SKETCH — RENDERING / PHYSICS / PARTICLES / UI
+     ============================================================== -->
+<script>
+/* ==================================================================
+   ==============================================================
+   SETUP (p5 sketch state)
+   ==============================================================
+   ================================================================== */
+
+// Landmark index groups for reference
+const FINGER_TIPS = { thumb:4, index:8, middle:12, ring:16, pinky:20 };
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],           // thumb
+  [0,5],[5,6],[6,7],[7,8],           // index
+  [0,9],[9,10],[10,11],[11,12],      // middle
+  [0,13],[13,14],[14,15],[15,16],    // ring
+  [0,17],[17,18],[18,19],[19,20],    // pinky
+  [5,9],[9,13],[13,17],[0,17]        // palm
+];
+
+const CRADLE_PAIRS = [
+  { finger:"thumb",  color:[0,255,255]   }, // cyan
+  { finger:"index",  color:[255,0,229]   }, // magenta
+  { finger:"middle", color:[255,242,0]   }, // yellow
+  { finger:"ring",   color:[0,119,255]   }, // electric blue
+  { finger:"pinky",  color:[166,0,255]   }  // purple
+];
+
+let smoothedHands = [];   // persistent smoothed landmark storage across frames, keyed by slot 0/1
+let particles = [];       // active particle pool
+let particlePool = [];    // inactive/reusable particles
+const MAX_PARTICLES = 150;
+
+let cameraHidden = false;
+let lastFrameTime = 0;
+let fpsSmoothed = 60;
+
+// touch-state tracking per cradle pair to avoid spawning particles every frame while touching
+let touchState = { thumb:false, index:false, middle:false, ring:false, pinky:false };
+
+// FIST BLINK EFFECT
+let fistBlink = 0;
+
+/* ==================================================================
+   ==============================================================
+   HELPERS
+   ==============================================================
+   ================================================================== */
+
+function lerp2(a, b, t){ return a + (b - a) * t; }
+
+function smoothLandmarks(prev, curr, smoothingFactor){
+  if(!prev) return curr.map(p => ({x:p.x, y:p.y, z:p.z}));
+  const out = new Array(curr.length);
+  for(let i=0;i<curr.length;i++){
+    out[i] = {
+      x: lerp2(prev[i].x, curr[i].x, smoothingFactor),
+      y: lerp2(prev[i].y, curr[i].y, smoothingFactor),
+      z: lerp2(prev[i].z, curr[i].z, smoothingFactor)
+    };
+  }
+  return out;
+}
+
+// Convert normalized (0-1, mirrored) landmark to canvas pixel space
+function toCanvasSpace(pt){
+  // MediaPipe gives x in [0,1] left-to-right on the *unmirrored* frame.
+  // Our video is mirrored via CSS, so flip x to match visually.
+  return {
+    x: (1 - pt.x) * width,
+    y: pt.y * height
+  };
+}
+
+function distPt(a, b){
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function getFreeParticle(){
+  if(particlePool.length > 0){
+    return particlePool.pop();
+  }
+  if(particles.length < MAX_PARTICLES){
+    return {};
+  }
+  return null; // pool exhausted, skip spawn
+}
+
+function spawnParticleBurst(x, y, col, count){
+  for(let i=0;i<count;i++){
+    const p = getFreeParticle();
+    if(!p) break;
+    const ang = random(TWO_PI);
+    const spd = random(1.2, 4.5);
+    p.x = x; p.y = y;
+    p.vx = Math.cos(ang) * spd;
+    p.vy = Math.sin(ang) * spd;
+    p.life = 1.0;
+    p.decay = random(0.015, 0.035);
+    p.size = random(3, 7);
+    p.col = col;
+    particles.push(p);
+  }
+}
+
+/* ==================================================================
+   ==============================================================
+   UI (button wiring)
+   ==============================================================
+   ================================================================== */
+function wireUI(){
+  document.getElementById("btnFullscreen").addEventListener("click", () => {
+    const el = document.documentElement;
+    if(!document.fullscreenElement){
+      el.requestFullscreen ? el.requestFullscreen() : el.webkitRequestFullscreen && el.webkitRequestFullscreen();
+    }else{
+      document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen && document.webkitExitFullscreen();
+    }
+  });
+
+  const toggleBtn = document.getElementById("btnToggleCam");
+  toggleBtn.addEventListener("click", () => {
+    cameraHidden = !cameraHidden;
+    const video = document.getElementById("webcamVideo");
+    video.classList.toggle("hiddenCam", cameraHidden);
+    toggleBtn.textContent = cameraHidden ? "Show Camera" : "Hide Camera";
+  });
+
+  document.getElementById("btnReset").addEventListener("click", () => {
+    particles.forEach(p => particlePool.push(p));
+    particles = [];
+    smoothedHands = [];
+    touchState = { thumb:false, index:false, middle:false, ring:false, pinky:false };
+  });
+}
+
+/* ==================================================================
+   ==============================================================
+   RENDERING - core p5 lifecycle
+   ==============================================================
+   ================================================================== */
+function setup(){
+  const holder = document.getElementById("canvasHolder");
+  const cnv = createCanvas(windowWidth, windowHeight);
+  cnv.parent(holder);
+  colorMode(RGB, 255, 255, 255, 1);
+  noStroke();
+  frameRate(144);
+  wireUI();
+}
+
+function windowResized(){
+  resizeCanvas(windowWidth, windowHeight);
+}
+
+function draw(){
+  // motion-trail background: translucent fill instead of full clear
+  clear();
+  fill(2, 4, 12, 0.28);
+  noStroke();
+  rect(0, 0, width, height);
+
+  const app = window.CradleApp;
+
+  // ---- update HUD stats ----
+  updateHud(app);
+
+  if(!app || !app.running){
+    return;
+  }
+
+  // ---- smooth incoming landmarks into persistent slots ----
+  const rawHands = app.hands || [];
+  const activeSmoothed = [];
+  for(let i=0;i<rawHands.length;i++){
+    const prevSlot = smoothedHands[i] ? smoothedHands[i].landmarks : null;
+    const smoothed = smoothLandmarks(prevSlot, rawHands[i].landmarks, 0.45);
+    activeSmoothed.push({ landmarks: smoothed, handedness: rawHands[i].handedness });
+  }
+  smoothedHands = activeSmoothed;
+
+  // Convert to canvas-space points once per frame for reuse
+  const handsCanvasPts = smoothedHands.map(h => h.landmarks.map(toCanvasSpace));
+
+  // ---- draw layers, back to front ----
+  drawParticles();          // behind strings/skeleton for depth
+  drawCradleStrings(handsCanvasPts);
+  drawHandSkeletons(handsCanvasPts);
+  drawLandmarkGlows(handsCanvasPts);
+  checkCradleTouches(handsCanvasPts);
+}
+
+/* ==================================================================
+   UI STAT UPDATES
+   ================================================================== */
+function updateHud(app){
+  const now = performance.now();
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+  const instFps = dt > 0 ? 1000 / dt : 60;
+  fpsSmoothed = lerp2(fpsSmoothed, instFps, 0.1);
+
+  document.getElementById("statFps").textContent = Math.round(fpsSmoothed);
+  const handCount = app && app.hands ? app.hands.length : 0;
+  document.getElementById("statHands").textContent = handCount;
+}
+
+/* ==================================================================
+   ==============================================================
+   RENDERING — LANDMARK GLOWS
+   ==============================================================
+   ================================================================== */
+function drawLandmarkGlows(handsCanvasPts){
+  const t = millis() * 0.004;
+  const drawingCtx = drawingContext;
+
+  for(let h=0; h<handsCanvasPts.length; h++){
+    const pts = handsCanvasPts[h];
+    for(let i=0;i<pts.length;i++){
+      const isTip = Object.values(FINGER_TIPS).includes(i);
+      const hueBase = (t * 40 + i * 14 + h * 90) % 360;
+      const col = color(`hsl(${hueBase}, 90%, 62%)`);
+
+      const pulse = isTip ? (0.6 + 0.4 * Math.sin(t * 3 + i)) : 1;
+      const baseSize = isTip ? 10 : 5;
+      const size = baseSize * (isTip ? (0.85 + 0.3 * pulse) : 1);
+
+      drawingCtx.shadowBlur = isTip ? 10 : 4;
+      drawingCtx.shadowColor = col.toString();
+
+      fill(col);
+      noStroke();
+      circle(pts[i].x, pts[i].y, size);
+    }
+  }
+  drawingCtx.shadowBlur = 0;
+}
+
+/* ==================================================================
+   RENDERING — HAND SKELETON
+   ================================================================== */
+function drawHandSkeletons(handsCanvasPts){
+  const drawingCtx = drawingContext;
+  drawingCtx.shadowBlur = 10;
+  drawingCtx.shadowColor = "rgba(0,246,255,0.9)";
+
+  strokeWeight(1.6);
+  stroke(0, 246, 255, 0.55);
+
+  for(let h=0; h<handsCanvasPts.length; h++){
+    const pts = handsCanvasPts[h];
+    for(const [a,b] of HAND_CONNECTIONS){
+      if(!pts[a] || !pts[b]) continue;
+      line(pts[a].x, pts[a].y, pts[b].x, pts[b].y);
+    }
+  }
+  drawingCtx.shadowBlur = 0;
+}
+
+/* ==================================================================
+   ==============================================================
+   STRING PHYSICS — CAT'S CRADLE CONNECTIONS
+   ==============================================================
+   ================================================================== */
+function drawCradleStrings(handsCanvasPts){
+  if(handsCanvasPts.length < 2) return; // need two hands to form a cradle
+
+  const handA = handsCanvasPts[0];
+  const handB = handsCanvasPts[1];
+  const t = millis() * 0.006;
+  const drawingCtx = drawingContext;
+
+  for(const pair of CRADLE_PAIRS){
+    const idx = FINGER_TIPS[pair.finger];
+    const p1 = handA[idx];
+    const p2 = handB[idx];
+    if(!p1 || !p2) continue;
+
+    const d = distPt(p1, p2);
+    const maxSpan = Math.max(width, height);
+    const stretchT = constrain(d / maxSpan, 0, 1); // 0 = close, 1 = far
+
+    // sag: more sag when hands are close, less (taut) when far apart
+    const sagAmount = lerp2(120, 6, stretchT);
+    // slight vibration when close together (strings "alive")
+    const vibration = (1 - stretchT) * Math.sin(t * 8 + idx) * 4;
+
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2 + sagAmount + vibration;
+
+    // thickness: thick when close, thin when stretched
+    const thickness = lerp2(6.5, 1.2, stretchT);
+    // glow intensity: stronger when close
+    const glowAmt = lerp2(30, 10, stretchT);
+
+    const [r,g,b] = pair.color;
+    drawingCtx.shadowBlur = glowAmt;
+    drawingCtx.shadowColor = `rgba(${r},${g},${b},0.95)`;
+
+    noFill();
+    stroke(r, g, b, 0.9);
+    strokeWeight(thickness);
+
+    beginShape();
+    curveVertex(p1.x, p1.y);
+    curveVertex(p1.x, p1.y);
+    curveVertex(midX, midY);
+    curveVertex(p2.x, p2.y);
+    curveVertex(p2.x, p2.y);
+    endShape();
+
+    // faint inner highlight for extra glow depth
+    stroke(255, 255, 255, 0.25);
+    strokeWeight(Math.max(1, thickness * 0.3));
+    beginShape();
+    curveVertex(p1.x, p1.y);
+    curveVertex(p1.x, p1.y);
+    curveVertex(midX, midY);
+    curveVertex(p2.x, p2.y);
+    curveVertex(p2.x, p2.y);
+    endShape();
+  }
+  drawingCtx.shadowBlur = 0;
+}
+
+/* ==================================================================
+   TOUCH DETECTION — spawns particles when matching fingertips meet
+   ================================================================== */
+function checkCradleTouches(handsCanvasPts){
+  if(handsCanvasPts.length < 2){
+    // reset touch state when hands aren't both visible
+    for(const k in touchState) touchState[k] = false;
+    return;
+  }
+  const handA = handsCanvasPts[0];
+  const handB = handsCanvasPts[1];
+  const TOUCH_THRESHOLD = 34;
+
+  for(const pair of CRADLE_PAIRS){
+    const idx = FINGER_TIPS[pair.finger];
+    const p1 = handA[idx];
+    const p2 = handB[idx];
+    if(!p1 || !p2) continue;
+
+    const d = distPt(p1, p2);
+    const isTouching = d < TOUCH_THRESHOLD;
+
+    if(isTouching && !touchState[pair.finger]){
+      const [r,g,b] = pair.color;
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      spawnParticleBurst(midX, midY, color(r,g,b), 22);
+    }
+    touchState[pair.finger] = isTouching;
+  }
+}
+
+function detectFist(handsCanvasPts){
+
+  if(handsCanvasPts.length === 0) return;
+
+  const hand = handsCanvasPts[0];
+
+  const wrist = hand[0];
+
+  const fingers = [
+    {tip:8, joint:6},
+    {tip:12, joint:10},
+    {tip:16, joint:14},
+    {tip:20, joint:18}
+  ];
+
+  let closedCount = 0;
+
+  for(const finger of fingers){
+
+    const tipDist = distPt(hand[finger.tip], wrist);
+    const jointDist = distPt(hand[finger.joint], wrist);
+
+    if(tipDist < jointDist){
+      closedCount++;
+    }
+  }
+
+
+  if(closedCount >= 3){
+    fistBlink = 1;
+  }
+
+}
+
+/* ==================================================================
+   ==============================================================
+   PARTICLES — pooled, fading, glowing
+   ==============================================================
+   ================================================================== */
+function drawParticles(){
+  const drawingCtx = drawingContext;
+  drawingCtx.shadowBlur = 6;
+
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+    p.life -= p.decay;
+
+    if(p.life <= 0){
+      particles.splice(i, 1);
+      particlePool.push(p);
+      continue;
+    }
+
+    const col = p.col;
+    drawingCtx.shadowColor = col.toString();
+    fill(red(col), green(col), blue(col), p.life);
+    noStroke();
+    circle(p.x, p.y, p.size * p.life);
+  }
+  drawingCtx.shadowBlur = 0;
+}
+</script>
+
+</body>
+</html>
+
